@@ -17,12 +17,12 @@ class EMVException(TagException):
         self.sw2 = sw2
         msg = ''
         try:
-            msg = EMV.statuses[sw1]
-            msg = '%s (%s)' % (msg, EMV.statuses[(sw1, sw2)])
+            msg = ' %s' % EMV.STATUSES[sw1]
+            msg = '%s (%s)' % (msg, EMV.STATUSES[(sw1, sw2)])
         except KeyError:
             pass
 
-        msg = '%02x%02x %s' % (sw1, sw2, msg)
+        msg = '%02x%02x%s' % (sw1, sw2, msg)
         TagException.__init__(self, msg)
 
 
@@ -82,16 +82,15 @@ class Tag(object):
             apps = self.emv.parse_apps(self.emv.read_record(1, sfi))
             priority, name, aid = apps[0]
             self.emv.select_by_df(aid)
-            card = self.emv.read_record(1, sfi)
-            name, cardnum, expiry, service, rest = self.emv.parse_card(card)
-            return cardnum
+            card = self.emv.parse_card(self.emv.read_record(1, sfi))
+            return card['cardnum']
 
         else:
             return self.uid
 
 
 class EMV(object):
-    statuses = {
+    STATUSES = {
         0x90: 'OK',
         0x61: 'More data',
         0x62: 'No change',
@@ -219,7 +218,14 @@ class EMV(object):
         service = rest[4:7]
         rest = rest[7:]
 
-        return (name, cardnum, expiry, service, rest)
+        card = dict(
+            name = name,
+            cardnum = cardnum,
+            expiry = expiry,
+            service = service,
+            rest = rest,
+        )
+        return card
 
 
     def verify(self):
@@ -367,6 +373,6 @@ if __name__ == '__main__':
                 # print map(hex, tag.find_14443_instrs())
                 # 20, 70, 82, 84, 88, a4, b2
 
-                card = e.parse_card(e.read_record(1, sfi))
+                print e.parse_card(e.read_record(1, sfi))
 
 
