@@ -2,6 +2,7 @@ What
 ====
 
 A Python library to identify an RFID card (reasonably) uniquely.
+Also happens to implement the ACR122 API, and exposes some PN532 functionality.
 
 Why
 ===
