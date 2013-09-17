@@ -188,7 +188,6 @@ class EMV(object):
             except EMVException, e:
                 if not (e.sw1, e.sw2) == (0x6a, 0x83):
                     raise
-                continue
                 break
 
         return records
