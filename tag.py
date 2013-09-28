@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 from smartcard.util import toHexString, toASCIIString, toASCIIBytes
 from smartcard.Exceptions import SmartcardException, NoReadersException, CardConnectionException, NoCardException
 from UserDict import DictMixin

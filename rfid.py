@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import time
 import smartcard
 from smartcard.CardConnectionObserver import ConsoleCardConnectionObserver
