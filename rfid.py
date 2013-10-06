@@ -27,6 +27,7 @@ DEBUG = False
 """
 Sources:
 http://www.proxmark.org/files/Documents/NFC/ACS_API_ACR122.pdf
+http://www.acs.com.hk/drivers/chi/API-ACR122USAM-2.01.pdf
 http://www.nxp.com/documents/user_manual/141520.pdf
 https://code.google.com/p/nfcip-java/source/browse/trunk/nfcip-java/doc/ACR122_PN53x.txt
 https://code.google.com/p/understand/wiki/SmartCards
@@ -144,7 +145,7 @@ class AcsReader(PcscReader):
     def open(self):
         PcscReader.open(self)
 
-        # We could force this in connect, but this is clearer
+        # We could pass this into connect, but this is clearer
         self.atr = ATR(self.conn.getATR())
         if DEBUG:
             print 'ATR: %s' % self.atr
@@ -391,6 +392,12 @@ class Pn532(object):
         # TODO: try max_tags=2
         if data is None:
             data = []
+            if encoding == 'Type B':
+                data = [0]
+            elif encoding.startswith('FeliCa'):
+                # This is suggested in the datasheet, but doesn't seem to work
+                data = [0x00, 0xff, 0xff, 0x00, 0x00]
+
         brty = self.ENCODINGS.index(encoding)
         resp = self.send(0x4a, [max_tags, brty] + data)
 
@@ -402,29 +409,76 @@ class Pn532(object):
         tags = []
         if brty == 0:
             for i in range(nbtg):
-                tg = r.next()
-                sens_res = (r.next() << 8) + r.next()
-                sel_res = r.next()
-
-                uidlen = r.next()
-                uid = ''.join('%02x' % r.next() for i in range(uidlen))
-
-                atslen = r.next()
-                ats = [r.next() for i in range(atslen - 1)]
-
-                tag = Tag(self, tg, sens_res, sel_res)
-                tag.uid = uid
-                tag.ats = ats
-                tags.append(tag)
+                tagtype = 0x10
+                tags.append(self.parse_tag(tagtype, r))
 
         else:
             raise NotImplementedError()
 
         return tags
 
-    def autopoll(self):
-        raise NotImplementedError()
-        return self.send(0x60, data)
+    def autoscan(self, polls=1, ms=150, types=[0x20, 0x23, 0x4, 0x10, 0x11, 0x12]):
+        if polls is None:
+            polls = 0xff
+        period = ms / 150
+
+        resp = self.send(0x60, [polls, period] + types)
+
+        r = iter(resp)
+        nbtg = r.next()
+        if not nbtg:
+            raise NoCardException()
+
+        tags = []
+        for i in range(nbtg):
+            tagtype = r.next()
+            length = r.next()
+
+            taginfo = [r.next() for i in range(length)]
+            tags.append(self.parse_tag(tagtype, iter(taginfo)))
+
+        return tags
+
+    # Move to tag.py
+    def parse_tag(self, tagtype, r):
+        target = r.next()
+
+        if tagtype in (0x10, 0x20):
+            sens_res = (r.next() << 8) + r.next()
+            sel_res = r.next()
+
+            uidlen = r.next()
+            uid = ''.join('%02x' % r.next() for i in range(uidlen))
+
+            tag = Tag(self, target, sens_res, sel_res)
+            tag.uid = uid
+
+            if tagtype == 0x20:
+                atslen = r.next()
+                ats = [r.next() for i in range(atslen - 1)]
+                tag.ats = ats
+
+        elif tagtype == 0x23:
+            atqb = [r.next() for i in range(12)]
+
+            arlen = r.next()
+            ar = [r.next() for i in range(arlen)]
+
+        elif tagtype == 0x11:
+            prlen = r.next()
+            pol_res = [r.next() for i in range(prlen - 1)]
+            p = iter(pol_res)
+
+            resp_code = p.next()
+            uid = ''.join('%02x' % p.next() for i in range(8))
+            print uid
+
+        elif tagtype == 0x4:
+            atqa = (r.next() << 8) + r.next()
+            uid = ''.join('%02x' % r.next() for i in range(4))
+
+        return tag
+
 
 from tag import Tag
 
@@ -443,6 +497,8 @@ if __name__ == '__main__':
         #p.set_params(rats=False)
 
         tags = p.scan()
+        #tags = p.autoscan()
+        print len(tags)
         print 'UID: %s' % tags[0].uid
         print 'ATR: %s' % toHexString(tags[0].ats)
 
