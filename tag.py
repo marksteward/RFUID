@@ -1,8 +1,7 @@
 #!/usr/bin/env python
-
 from smartcard.util import toHexString, toASCIIString, toASCIIBytes
 from smartcard.Exceptions import SmartcardException, NoReadersException, CardConnectionException, NoCardException
-from UserDict import DictMixin
+from ber import BER
 
 class TagException(SmartcardException):
     pass
@@ -31,9 +30,8 @@ class EMVException(TagException):
 """
 http://www.cardwerk.com/smartcards/smartcard_standard_ISO7816-4_5_basic_organizations.aspx ff.
 http://blog.saush.com/2006/09/08/getting-information-from-an-emv-chip-card/
-http://www.openscdp.org/scripts/tutorial/emv/applicationselection.html
-http://www.emvlab.org/emvtags/all/
 http://www.openscdp.org/scripts/tutorial/emv/
+http://www.emvlab.org/emvtags/all/
 https://www.paypass.com/Term_TA/PP_Test_Cases_L2_%20Oct_10.pdf
 
 """
@@ -128,6 +126,22 @@ class EMV(object):
         0x6f: 'Unknown',
     }
 
+    TAGS = dict(
+        AID        = 0x4f,
+        APP_LABEL  = 0x50,
+        TRACK2     = 0x57,
+        NAME       = 0x5f20,
+        LANG       = 0x5f2d,
+        APP        = 0x61,
+        FCI        = 0x6f,
+        EMV        = 0x70,
+        DFNAME     = 0x84,
+        PRIORITY   = 0x87,
+        SFI        = 0x88,
+        FCI_PROP   = 0xa5,
+        FCI_OPT    = 0xbf0c,
+    )
+
     def __init__(self, tag):
         self.tag = tag
 
@@ -149,17 +163,17 @@ class EMV(object):
         which = ['first', 'last', 'next', 'prev'].index(which)
         resp = self.send(APDU(0, 0xa4, 4, which, data=pattern))
 
-        ber = BER(resp)
+        ber = BER(resp, tags=EMV.TAGS)
         fci = ber['FCI']
 
-        df = fci['DFNAME'].string
+        df = str(fci['DFNAME'])
 
         fci_issuer = fci['FCI_PROP']
         sfi = None
         if 'SFI' in fci_issuer:
-            sfi = fci_issuer['SFI'].int
+            sfi = int(fci_issuer['SFI'])
 
-        #lang = fci_issuer['LANG'].string
+        #lang = str(fci_issuer['LANG'])
 
         return df, sfi
 
@@ -195,23 +209,23 @@ class EMV(object):
         return records
         
     def parse_apps(self, resp):
-        ber = BER(resp)
+        ber = BER(resp, tags=EMV.TAGS)
         emv = ber['EMV']
         apps = []
-        for app in emv['APP']:
-            priority = app['PRIORITY'].int
-            label = app['APP_LABEL'].string
-            aid = app['AID'].bytes
+
+        for app in emv.getlist('APP'):
+            priority = int(app['PRIORITY'])
+            label = str(app['APP_LABEL'])
+            aid = app['AID'].data
             apps.append((priority, label, aid))
 
         return sorted(apps)
 
     def parse_card(self, data):
+        card = BER(data, tags=EMV.TAGS)['EMV']
 
-        card = BER(data)['EMV']
-
-        name = card['NAME'].string
-        track2 = card['TRACK2'].bytes
+        name = str(card['NAME'])
+        track2 = card['TRACK2'].data
 
         track2 = ''.join(['%02X' % b for b in track2])
         cardnum, rest = track2.split('D', 1)
@@ -239,141 +253,54 @@ class EMV(object):
 
 
 
-
-class BER(DictMixin):
-    # These are ASN.1 record tags, nothing to do with RFID
-    TAGS = dict(
-        AID        = 0x4f,
-        APP_LABEL  = 0x50,
-        TRACK2     = 0x57,
-        NAME       = 0x5f20,
-        LANG       = 0x5f2d,
-        APP        = 0x61,
-        FCI        = 0x6f,
-        EMV        = 0x70,
-        DFNAME     = 0x84,
-        PRIORITY   = 0x87,
-        SFI        = 0x88,
-        FCI_PROP   = 0xa5,
-        FCI_OPT    = 0xbf0c,
-    )
-
-    def __init__(self, bytes):
-        self.bytes = bytes
-        # TODO: use namedtuple?
-        self._ber = None
-
-    def __str__(self):
-        entries = []
-        for key, value in self.ber.items():
-            if isinstance(value, list):
-                value = ','.join('(%s)' % toHexString(v.bytes) for v in value)
-            else:
-                value = '(%s)' % toHexString(value.bytes)
-            entries.append('%X%s' % (key, value))
-        return '<BER %s>' % ', '.join(entries)
-
-    @property
-    def ber(self):
-        if self._ber is None:
-            self._ber = BER.read_ber(self.bytes)
-        return self._ber
-
-    @property
-    def int(self):
-        return int(''.join('%02x' % b for b in self.bytes), 16)
-
-    @property
-    def string(self):
-        return toASCIIString(self.bytes)
-        
-    def keys(self):
-        return self.ber.keys()
-
-    def __getitem__(self, name):
-        if isinstance(name, int):
-            return self.ber[name]
-        return self.ber[self.TAGS[name]]
-
-    @classmethod
-    def read_ber(self, data):
-        d = iter(data)
-
-        rv = {}
-        while True:
-            try:
-                tag = d.next()
-            except StopIteration:
-                break
-
-            try:
-                # Don't decode tagId, treat it as just a tag
-                if tag & 0x1f == 0x1f:
-                    t = 0x80
-                    while t & 0x80:
-                        t = d.next()
-                        if not t & 0x7f:
-                            raise ValueError()
-                        tag = (tag << 8) + (t & 0x7f)
-
-                length = d.next()
-                if length & 0x80:
-                    size = length & 0x7f
-                    if size == 0:
-                        raise NotImplementedError
-
-                    length = 0
-                    for i in range(size):
-                        length = length << 8 + d.next()
-
-                value = [d.next() for i in range(length)]
-
-                # TODO; something more sensible
-                if tag not in rv:
-                    rv[tag] = BER(value)
-                else:
-                    if not isinstance(rv[tag], list):
-                        rv[tag] = [rv[tag]]
-                    rv[tag].append(BER(value))
-
-            except StopIteration, e:
-                raise IndexError()
-
-        return rv
-
-
-
 from rfid import Pcsc, APDU
 
 if __name__ == '__main__':
+    from pprint import pprint
 
     with Pcsc.reader() as reader:
         for tag in reader.pn532.scan():
 
-            print tag.find_unique_id()
-            continue
+            #print tag.find_unique_id()
+            #continue
 
 
-
-
-            e = tag.emv
+            emv = tag.emv
             # print map(hex, tag.find_14443_instrs())
             # 70, a4, ca
 
             #for variant in (1, 2):
-            #    print e.select_all_by_df('%dPAY.' % variant)
+            #    print emv.select_all_by_df('%dPAY.' % variant)
 
-            name, sfi = e.select_by_df(toASCIIBytes('1PAY.SYS.DDF01'))
+            def find_files(emv):
+                for i in range(256):
+                    try:
+                        name, sfi = emv.select_by_df(toASCIIBytes(chr(i)))
+                        print name, sfi
+
+                    except Exception, e:
+                        if isinstance(e, EMVException):
+                            print e.sw1, e.sw2
+                            if (e.sw1, e.sw2) == (0x6a, 0x82):
+                                pass
+                        else:
+                            raise
+
+            #find_files(emv)
+
+            name, sfi = emv.select_by_df(toASCIIBytes('1PAY.SYS.DDF01'))
             # print map(hex, tag.find_14443_instrs())
             # 70, a4, b2
 
-            apps = e.parse_apps(e.read_record(1, sfi))
+            apps = emv.parse_apps(emv.read_record(1, sfi))
 
+            pprint(apps)
             for priority, name, aid in apps:
-                e.select_by_df(aid)
-                # print map(hex, tag.find_14443_instrs())
-                # 20, 70, 82, 84, 88, a4, b2
+                if name.startswith('VISA'):
+                    emv.select_by_df(aid)
+                    # print map(hex, tag.find_14443_instrs())
+                    # 20, 70, 82, 84, 88, a4, b2
 
-                print e.parse_card(e.read_record(1, sfi))
+                    print emv.parse_card(emv.read_record(1, sfi))
 
 
