@@ -43,7 +43,7 @@ class Pcsc(object):
     def wrapreader(self, reader):
         if reader.name.startswith('ACS'):
             return AcsReader(reader)
-        UnknownReader(reader)
+        return UnknownReader(reader)
 
     @classmethod
     def readers(self):
