@@ -229,6 +229,9 @@ class AcsReader(PcscReader):
     def green_off(self):
         self.led_buzzer(green=False)
 
+    def leds_off(self):
+        self.led_buzzer(red=False, green=False)
+
     def denied(self):
         self.led_buzzer(
             red=[True, False, False],
