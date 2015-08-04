@@ -8,7 +8,7 @@ from smartcard.ATR import ATR
 from smartcard.Exceptions import SmartcardException, NoReadersException, CardConnectionException, NoCardException
 
 # Try to use pyscard exceptions so it's easier to catch
-class UnsupportedReader(SmartcardException):
+class UnsupportedReaderException(SmartcardException):
     pass
 
 class ReaderException(SmartcardException):
@@ -43,7 +43,7 @@ class Pcsc(object):
     def wrapreader(self, reader):
         if reader.name.startswith('ACS'):
             return AcsReader(reader)
-        return UnknownReader(reader)
+        return UnsupportedReader(reader)
 
     @classmethod
     def readers(self):
@@ -58,6 +58,7 @@ class Pcsc(object):
             raise NoReadersException()
 
         if readernum is None:
+            readers = [r for r in readers if not isinstance(r, UnsupportedReader)]
             readernum = 0
 
         return readers[readernum]
@@ -96,7 +97,7 @@ class PcscReader(object):
 
 class UnsupportedReader(PcscReader):
     def open(self):
-        raise UnsupportedReader()
+        raise UnsupportedReaderException(self.name)
 
     def close(self):
         pass
