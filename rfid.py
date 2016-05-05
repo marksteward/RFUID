@@ -43,7 +43,8 @@ class Pcsc(object):
     def wrapreader(self, reader):
         if reader.name.startswith('ACS'):
             return AcsReader(reader)
-        return UnsupportedReader(reader)
+
+        return BasicChipReader(reader)
 
     @classmethod
     def readers(self):
@@ -136,6 +137,31 @@ class APDU(object):
             raise ValueError('Length %s is incorrect for APDU length %s' % (5 + lc, len(bytes)))
         args.append(bytes[5:])
         return APDU(*args)
+
+
+class BasicChipReader(PcscReader):
+    def open(self):
+        PcscReader.open(self)
+
+        # We could pass this into connect, but this is clearer
+        self.atr = ATR(self.conn.getATR())
+        if DEBUG:
+            print 'ATR: %s' % self.atr
+            self.atr.dump()
+
+        if DEBUG:
+            print 'Firmware version %s' % self.firmware_version()
+
+        # will raise NoCardException if no card is present
+        resp, sw1, sw2 = self.send_to_tag(APDU(0xff, 0xca, 0, 0, 0))
+        uid = ''.join('%02x' % ord(c) for c in resp)
+
+        self.tag = Tag(self, None, None, None)
+        tag.uid = uid
+
+    def send_to_tag(self, apdu):
+        resp, sw1, sw2 = self.conn.transmit(list(apdu), protocol=smartcard.scard.SCARD_PROTOCOL_T1)
+        return resp, sw1, sw2
 
 
 class AcsReader(PcscReader):
@@ -495,16 +521,22 @@ if __name__ == '__main__':
         #print toHexString(reader.sam_serial())
         #print reader.sam_os()
         
-        p = reader.pn532
-        #print p.firmware()
-        #p.shutdown(0)
-        #p.set_params(rats=False)
+        if isinstance(reader, AcsReader):
+            p = reader.pn532
+            #print p.firmware()
+            #p.shutdown(0)
+            #p.set_params(rats=False)
 
-        tags = p.scan()
-        #tags = p.autoscan()
-        print len(tags)
-        print 'UID: %s' % tags[0].uid
-        print 'ATR: %s' % toHexString(tags[0].ats)
+            tags = p.scan()
+            #tags = p.autoscan()
+            print len(tags)
+            tag = tags[0]
+
+        else:
+            tag = reader.tag
+
+        print 'UID: %s' % tag.uid
+        print 'ATR: %s' % toHexString(tag.ats)
 
         #print p.status()
         #p.halt_tag()
