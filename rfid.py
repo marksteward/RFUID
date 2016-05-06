@@ -44,7 +44,7 @@ class Pcsc(object):
         if reader.name.startswith('ACS'):
             return AcsReader(reader)
 
-        return BasicChipReader(reader)
+        return LowLevelChipReader(reader)
 
     @classmethod
     def readers(self):
@@ -131,7 +131,7 @@ class APDU(object):
 
     @classmethod
     def frombytes(self, bytes):
-        args = bytes[:4]
+        args = bytes[:5]
         lc = bytes[4]
         if 5 + lc != len(bytes):
             raise ValueError('Length %s is incorrect for APDU length %s' % (5 + lc, len(bytes)))
@@ -147,21 +147,91 @@ class BasicChipReader(PcscReader):
         self.atr = ATR(self.conn.getATR())
         if DEBUG:
             print 'ATR: %s' % self.atr
-            self.atr.dump()
+            try:
+                self.atr.dump()
+            except TypeError as e:
+                print 'Exception %r dumping ATR' % e
 
-        if DEBUG:
-            print 'Firmware version %s' % self.firmware_version()
-
-        # will raise NoCardException if no card is present
-        resp, sw1, sw2 = self.send_to_tag(APDU(0xff, 0xca, 0, 0, 0))
-        uid = ''.join('%02x' % ord(c) for c in resp)
+        if self.atr.isT1Supported():
+            # will raise NoCardException if no card is present
+            resp, sw1, sw2 = self.send_to_tag(None, APDU(0xff, 0xca), protocol=smartcard.scard.SCARD_PROTOCOL_T1)
+            uid = ''.join('%02x' % ord(c) for c in resp)
+        else:
+            uid = None
 
         self.tag = Tag(self, None, None, None)
-        tag.uid = uid
+        self.tag.uid = uid
+        self.tag.ats = self.atr.bytes
 
-    def send_to_tag(self, apdu):
-        resp, sw1, sw2 = self.conn.transmit(list(apdu), protocol=smartcard.scard.SCARD_PROTOCOL_T1)
-        return resp, sw1, sw2
+    def send_to_tag(self, tag, apdu):
+        if tag is not None:
+            raise ValueError('Multiple tags not supported')
+
+        resp, sw1, sw2 = self.conn.transmit(list(apdu))
+        if sw1 == 0x61:  # More data
+            apdu2 = APDU(0, 0xc0, lc=sw2)
+            resp, sw1, sw2 = self.conn.transmit(list(apdu2))
+
+        return [sw1, sw2] + resp
+
+
+class HResultException(Exception):
+    pass
+
+def HResult(vals):
+    if not isinstance(vals, (tuple, list)):
+        vals = (vals,)
+    hresult = vals[0]
+    if hresult < 0:
+        raise HResultException('hResult was 0x%08x' % hresult)
+    if len(vals) == 1:
+        return None
+    if len(vals) == 2:
+        return vals[1]
+    return vals[1:]
+
+class LowLevelChipReader(PcscReader):
+    """
+    Some cards (or just Gemalto readers?) fails with "656e Error, changed" unless you do this
+    """
+    def open(self):
+        self.hcontext = HResult(smartcard.scard.SCardEstablishContext(smartcard.scard.SCARD_SCOPE_USER))
+        self.hcard, dwActiveProtocol = HResult(smartcard.scard.SCardConnect(
+            self.hcontext, self.name, smartcard.scard.SCARD_SHARE_EXCLUSIVE, smartcard.scard.SCARD_PROTOCOL_T0))
+
+        self.tag = Tag(self, None, None, None)
+        self.tag.uid = None
+        self.tag.ats = []
+
+    def close(self):
+        HResult(smartcard.scard.SCardDisconnect(self.hcard, smartcard.scard.SCARD_LEAVE_CARD))
+
+    def send_to_tag(self, tag, apdu):
+        if tag is not None:
+            raise ValueError('Multiple tags not supported')
+
+        HResult(smartcard.scard.SCardBeginTransaction(self.hcard))
+
+        if DEBUG:
+            print '> %s' % toHexString(list(apdu))
+
+        response = HResult(smartcard.scard.SCardTransmit(self.hcard, smartcard.scard.SCARD_PCI_T0, list(apdu)))
+        if DEBUG:
+            print '< %s' % toHexString(response)
+
+        sw1, sw2 = response[0:2]
+        if sw1 == 0x61:  # More data
+            apdu2 = APDU(0, 0xc0, lc=sw2)
+            if DEBUG:
+                print '> %s' % toHexString(list(apdu2))
+
+            response = HResult(smartcard.scard.SCardTransmit(self.hcard, smartcard.scard.SCARD_PCI_T0, list(apdu2)))
+            if DEBUG:
+                print '< %s' % toHexString(response)
+
+        HResult(smartcard.scard.SCardEndTransaction(self.hcard, smartcard.scard.SCARD_LEAVE_CARD))
+
+        return response
 
 
 class AcsReader(PcscReader):
@@ -513,14 +583,16 @@ class Pn532(object):
 from tag import Tag
 
 if __name__ == '__main__':
+
     with Pcsc.reader() as reader:
+
         #reader.denied()
         #time.sleep(1)
 
         #print toASCIIString(reader.sam_id())
         #print toHexString(reader.sam_serial())
         #print reader.sam_os()
-        
+
         if isinstance(reader, AcsReader):
             p = reader.pn532
             #print p.firmware()

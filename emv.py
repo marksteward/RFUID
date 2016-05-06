@@ -3,6 +3,7 @@ from ber import Tags, BERWithTags
 from collections import OrderedDict
 from os import urandom
 from tag import Tag, TagException
+from rfid import AcsReader
 
 class EMVError(TagException):
     pass
@@ -472,9 +473,17 @@ if __name__ == '__main__':
     import sys
 
     with Pcsc.reader() as reader:
-        for tag in reader.pn532.scan():
+
+        # FIXME
+        if isinstance(reader, AcsReader):
+            tags = reader.pn532.scan()
+        else:
+            tags = [reader.tag]
+
+        for tag in tags:
 
             # print tag.find_unique_id()
+
 
             # Why does 2PAY return an empty sfi?
 
