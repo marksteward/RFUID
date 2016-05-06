@@ -1,14 +1,50 @@
 #!/usr/bin/env python
 from collections import defaultdict
 from UserDict import DictMixin
+import pprint
 
-universal_tags = dict(
-    BOOLEAN    = 0x1,
-    INTEGER    = 0x2,
-    BYTES      = 0x4,
-    FLOAT      = 0x9,
-    STRING     = 0xc,
+class Tags(object):
+    default_parser = repr
+
+    def __init__(self, *tagdata):
+        self._tagdata = tagdata
+
+        self.tags = {}
+        self.tagnames = {}
+        self.parsers = {}
+
+        # tagdata is a list of id, name and optional parser
+        for tag in tagdata:
+            if len(tag) > 2:
+                id, name, parser = tag
+                self.parsers[id] = parser
+            else:
+                id, name = tag
+
+            self.tags[name] = id
+            self.tagnames[id] = name
+
+    def __getitem__(self, name):
+        return self.tags[name]
+
+    def tagname(self, tag):
+        return self.tagnames.get(tag, '0x%x' % tag)
+
+    def tag(self, tag):
+        return self[tag]
+
+    def parser(self, tag, default=default_parser):
+        return self.parsers.get(tag, default)
+
+
+universal_tags = Tags(
+    (0x1, 'BOOLEAN', bool),
+    (0x2, 'INTEGER', int),
+    (0x4, 'BYTES',   bytearray),
+    (0x9, 'FLOAT',   float),
+    (0xc, 'STRING',  str),
 )
+# everything else is repr
 
 class BER(DictMixin):
     """
@@ -90,20 +126,22 @@ class BER(DictMixin):
     def __init__(self, data, tags=None):
         self._data = data
         self._ber = None
+        self._entries = None
         if tags is not None:
             self.tags = tags
         else:
-            self.tags = {}
+            self.tags = universal_tags
 
+    def __hex__(self):
+        return ' '.join('%02x' % b for b in self._data)
 
     def __repr__(self):
-        return '<BER %s>' % ' '.join('%02x' % b for b in self._data)
+        return '<BER %s>' % hex(self)
 
     def __nonzero__(self):
-        if self._ber is None:
-            # No need to parse
-            return bool(self._data)
-        return bool(self._ber)
+        # No need to parse - any valid data will result in a tag
+        # Invalid data will result in an exception when parsing
+        return bool(self._data)
 
 
     # BER-specific stuff, to save time
@@ -116,42 +154,56 @@ class BER(DictMixin):
 
 
     def bool(self, index=0):
-        vals = self.ber[self.gettag('BOOLEAN')]
+        vals = self.ber[self.tags['BOOLEAN']]
         return bool(int(vals[index]))
 
     def int(self, index=0):
-        vals = self.ber[self.gettag('INTEGER')]
+        vals = self.ber[self.tags['INTEGER']]
         return int(vals[index])
 
     def bytearray(self, index=0):
-        vals = self.ber[self.gettag('BYTES')]
+        vals = self.ber[self.tags['BYTES']]
         return bytearray(vals[index].data)
 
     def float(self, index=0):
         raise NotImplementedError()
 
     def str(self, index=0):
-        vals = self.ber[self.gettag('STRING')]
+        vals = self.ber[self.tags['STRING']]
         return str(vals[index])
-
-    def gettag(self, tag):
-        try:
-            return self.tags[tag]
-        except KeyError, e:
-            return universal_tags[tag]
 
 
    # And now the MultiDict parts
 
     def __getitem__(self, tag):
         if isinstance(tag, basestring):
-            tag = self.gettag(tag)
+            tag = self.tags[tag]
         return self.ber[tag][0]
+
+    def parsed(self, tag):
+        if isinstance(tag, basestring):
+            tag = self.tags[tag]
+        parser = self.tags.parser(tag)
+        return parser(self.ber[tag][0])
+
+    def getparsed(self, tag, default=None):
+        if isinstance(tag, basestring):
+            tag = self.tags[tag]
+        if tag not in self.ber:
+            return default
+        parser = self.tags.parser(tag)
+        return parser(self.ber[tag][0])
 
     def getlist(self, tag):
         if isinstance(tag, basestring):
-            tag = self.gettag(tag)
+            tag = self.tags[tag]
         return self.ber.get(tag, [])
+
+    def getlistparsed(self, tag):
+        if isinstance(tag, basestring):
+            tag = self.tags[tag]
+        parser = self.tags.parser(tag)
+        return map(parser, self.ber.get(tag, []))
 
     def keys(self):
         return self.ber.keys()
@@ -165,6 +217,8 @@ class BER(DictMixin):
     def lists(self):
         return self.ber.items()
 
+    # FIXME: make lists return in order, or add an orderedlists?
+
     def listvalues(self):
         return self.ber.values()
 
@@ -177,50 +231,145 @@ class BER(DictMixin):
         return self._data[:]
 
     @property
-    def ber(self):
-        if self._ber is None:
+    def entries(self):
+        if self._entries is None:
             self.read_ber()
+        return self._entries
+
+    @property
+    def ber(self):
+        if self._entries is None:
+            self.read_ber()
+            # Don't use a defaultdict, so we get KeyErrors
+            self._ber = {}
+            for tag, entry in self._entries:
+                if tag not in self._ber:
+                    self._ber[tag] = []
+                self._ber[tag].append(entry)
+
         return self._ber
 
+    def read_tag_id(self, d):
+        tag = d.next()
+        try:
+            if tag & 0x1f == 0x1f:
+                b = 0x80
+                while b & 0x80:
+                    b = d.next()
+                    if not b & 0x7f:
+                        raise ValueError('Invalid tag ID')
+                    tag = (tag << 8) + (b & 0x7f)
+
+            return tag
+
+        except StopIteration:
+            raise IndexError('Incomplete tag ID')
+       
  
     def read_ber(self):
         d = iter(self._data)
 
-        rv = defaultdict(list)
+        self._entries = []
         while True:
             try:
-                tag = d.next()
+                tag = self.read_tag_id(d)
             except StopIteration:
                 break
 
             try:
-                # Don't decode tagId, treat it as just a tag
-                if tag & 0x1f == 0x1f:
-                    t = 0x80
-                    while t & 0x80:
-                        t = d.next()
-                        if not t & 0x7f:
-                            raise ValueError()
-                        tag = (tag << 8) + (t & 0x7f)
-
                 length = d.next()
                 if length & 0x80:
+                    # size of the length field
                     size = length & 0x7f
                     if size == 0:
-                        raise NotImplementedError
+                        # read up to EOC tag
+                        raise NotImplementedError('Indefinite length')
 
                     length = 0
                     for i in range(size):
-                        length = length << 8 + d.next()
+                        length = (length << 8) + d.next()
 
                 value = [d.next() for i in range(length)]
 
-                rv[tag].append(BER(value, tags=self.tags))
+                # This shouldn't be needed for consuming,
+                # but it's helpful for debugging
+                self._entries.append((tag, BER(value, tags=self.tags)))
 
             except StopIteration, e:
-                raise IndexError()
+                raise EOFError('Incomplete data')
 
-        self._ber = dict(rv.items())
+
+
+    def get_struct(self):
+        entries = []
+        
+        if self._entries is None:
+            self.read_ber()
+
+        for tag, entry in self._entries:
+            parser = self.tags.parser(tag, None)
+            if parser:
+                pass
+            elif entry.data:
+                try:
+                    entry.read_ber()
+                except Exception, e:
+                    pass
+                else:
+                    entry = entry.get_struct()
+
+            entries.append((tag, entry))
+
+        return entries
+
+    # FIXME: consider flattening it first (with a depth and tag for each line), so it can be post-processed
+
+    def dump_ber(self, depth=0):
+        last_tag = None
+        lines = []
+
+        def indent(line, depth):
+            return '  ' * depth + line
+
+        if self._entries is None:
+            self.read_ber()
+
+        for tag, entry in self._entries:
+            if tag != last_tag:
+                if tag in self.tags.tagnames:
+                    tagstr = '%s (0x%x)' % (self.tags.tagname(tag), tag)
+                else:
+                    tagstr = '0x%x' % tag
+                lines.append(indent(tagstr, depth))
+
+            parser = self.tags.parser(tag, None)
+            if parser:
+                entry = repr(parser(entry))
+            elif entry.data:
+                try:
+                    entry.read_ber()
+                except Exception, e:
+                    entry = repr(entry)
+                else:
+                    entry = entry.dump_ber(depth=depth + 1)
+            else:
+                entry = ''
+
+            lines.append(indent(entry, depth + 1))
+            last_tag = tag
+
+        return '\n'.join(lines)
+
+    def dump(self):
+        print self.dump_ber()
+
+
+def BERWithTags(tags):
+    tags = Tags(*universal_tags._tagdata + tags._tagdata)
+    class BERWithTags(BER):
+        def __init__(self, data):
+            BER.__init__(self, data, tags=tags)
+    return BERWithTags
 
 
 if __name__ == '__main__':
