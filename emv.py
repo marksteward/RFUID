@@ -2,8 +2,7 @@ from smartcard.util import toHexString, toASCIIString, toASCIIBytes, toBytes
 from ber import Tags, BERWithTags
 from collections import OrderedDict
 from os import urandom
-from tag import Tag, TagException
-from rfid import AcsReader
+from common import TagException
 
 class EMVError(TagException):
     pass
@@ -466,9 +465,9 @@ class DOL(object):
         return dol
 
 
-from rfid import Pcsc, APDU
 
 if __name__ == '__main__':
+    from rfid import Pcsc
     from pprint import pprint
     import sys
 
@@ -615,3 +614,4 @@ if __name__ == '__main__':
                 break # temporarily
 
 
+from rfid import AcsReader, APDU

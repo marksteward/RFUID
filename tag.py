@@ -1,11 +1,8 @@
 #!/usr/bin/env python
 from smartcard.util import toASCIIBytes, toHexString
-from smartcard.Exceptions import SmartcardException
 #from hashlib import sha256
+from common import TagException
 from collections import defaultdict
-
-class TagException(SmartcardException):
-    pass
 
 class TagInstructionNotSupported(TagException):
     pass
@@ -84,10 +81,10 @@ class Tag(object):
             return CardUID(self.uid)
 
 
-from rfid import Pcsc
 from emv import EMV
 
 if __name__ == '__main__':
+    from rfid import Pcsc
     from pprint import pprint
 
     with Pcsc.reader() as reader:
