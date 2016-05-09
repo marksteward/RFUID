@@ -17,7 +17,7 @@ def brute_instrs(tag):
     # LINK/VISADEBIT: 00 20, 00 70, 00 82, 00 84, 00 88, 00 A4, 00 B2, 80 A8, 80 AE, 80 CA
 
 with Pcsc.reader() as reader:
-    for tag in reader.pn532.scan():
+    for tag in reader.tags:
         brute_instrs(tag)
 
         print 'Selecting 2PAY'

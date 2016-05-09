@@ -27,7 +27,7 @@ def brute_data(tag):
     #   0xbf56, 0xbf57, 0xbf58, 0xbf5b
 
 with Pcsc.reader() as reader:
-    for tag in reader.pn532.scan():
+    for tag in reader.tags:
         brute_data(tag)
 
         print 'Selecting 1PAY'

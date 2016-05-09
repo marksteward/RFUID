@@ -114,6 +114,6 @@ def brute_pdol(tag):
 
 if __name__ == '__main__':
     with Pcsc.reader() as reader:
-        for tag in reader.pn532.scan():
+        for tag in reader.tags:
             brute_pdol(tag)
 

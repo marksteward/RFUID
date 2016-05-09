@@ -476,14 +476,7 @@ if __name__ == '__main__':
     import sys
 
     with Pcsc.reader() as reader:
-
-        # FIXME
-        if isinstance(reader, AcsReader):
-            tags = reader.pn532.scan()
-        else:
-            tags = [reader.tag]
-
-        for tag in tags:
+        for tag in reader.tags:
 
             # print tag.find_unique_id()
 

@@ -163,6 +163,10 @@ class BasicChipReader(PcscReader):
         self.tag.uid = uid
         self.tag.ats = self.atr.bytes
 
+    @property
+    def tags(self):
+        return [self.tag]
+
     def send_to_tag(self, tag, apdu):
         if tag is not None:
             raise ValueError('Multiple tags not supported')
@@ -205,6 +209,10 @@ class LowLevelChipReader(PcscReader):
 
     def close(self):
         HResult(smartcard.scard.SCardDisconnect(self.hcard, smartcard.scard.SCARD_LEAVE_CARD))
+
+    @property
+    def tags(self):
+        return [self.tag]
 
     def send_to_tag(self, tag, apdu):
         if tag is not None:
@@ -260,6 +268,10 @@ class AcsReader(PcscReader):
     def send(self, apdu):
         resp, sw1, sw2 = self.conn.transmit(list(apdu))
         return resp, sw1, sw2
+
+    @property
+    def tags(self):
+        return self.pn532.scan()
 
 
     def firmware_version(self):
@@ -599,18 +611,16 @@ if __name__ == '__main__':
             #p.shutdown(0)
             #p.set_params(rats=False)
 
-            tags = p.scan()
             #tags = p.autoscan()
-            print len(tags)
+            #print len(tags)
+
+            #print p.status()
+            #p.halt_tag()
+
+        for tag in reader.tags:
             tag = tags[0]
 
-        else:
-            tag = reader.tag
-
-        print 'UID: %s' % tag.uid
-        print 'ATR: %s' % toHexString(tag.ats)
-
-        #print p.status()
-        #p.halt_tag()
+            print 'UID: %s' % tag.uid
+            print 'ATR: %s' % toHexString(tag.ats)
 
 

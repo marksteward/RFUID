@@ -88,7 +88,7 @@ if __name__ == '__main__':
     from pprint import pprint
 
     with Pcsc.reader() as reader:
-        for tag in reader.pn532.scan():
+        for tag in reader.tags:
 
             print tag.find_unique_id()
 

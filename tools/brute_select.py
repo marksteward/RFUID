@@ -13,12 +13,7 @@ from rfid import Pcsc, APDU, AcsReader
 from smartcard.util import toHexString, toASCIIString, toASCIIBytes
 
 with Pcsc.reader() as reader:
-        if isinstance(reader, AcsReader):
-            tags = reader.pn532.scan()
-        else:
-            tags = [reader.tag]
-
-        for tag in tags:
+  for tag in reader.tags:
 
 		#print tag.find_unique_id()
 		#continue
