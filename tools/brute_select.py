@@ -8,9 +8,17 @@ https://www.level2kernel.com/emv-glossary.html
 The PPSE on a contactless card contains the list of all card applications supported by the contactless interface, and is returned from the card in response to the reader issuing a SELECT command for the PPSE.
 """
 
+from emv import EMVException
+from rfid import Pcsc, APDU, AcsReader
+from smartcard.util import toHexString, toASCIIString, toASCIIBytes
 
 with Pcsc.reader() as reader:
-	for tag in reader.pn532.scan():
+        if isinstance(reader, AcsReader):
+            tags = reader.pn532.scan()
+        else:
+            tags = [reader.tag]
+
+        for tag in tags:
 
 		#print tag.find_unique_id()
 		#continue
@@ -26,8 +34,8 @@ with Pcsc.reader() as reader:
 			for i in range(len(name), 0, -1):
 				try:
 					prefix = name[:i]
-					name, sfi = emv.select_by_df(toASCIIBytes(prefix))
-				except Exception, e:
+					result = emv.select_by_df(toASCIIBytes(prefix))
+				except EMVException, e:
 					if (e.sw1, e.sw2) == (0x6a, 0x82): # not found
 						return i + 1
 
@@ -37,7 +45,7 @@ with Pcsc.reader() as reader:
 			# You can't get the "next" filename when selecting by AID
 			try:
 				dfs = [emv.select_by_df(name)]
-			except Exception, e:
+			except EMVException, e:
 				if not (e.sw1, e.sw2) == (0x6a, 0x82): # not found
 					raise
 				return []
@@ -57,27 +65,29 @@ with Pcsc.reader() as reader:
 
 				try:
 					dfs.append(emv.select_by_df(curr))
-				except Exception, e:
+				except EMVException, e:
 					pass # FIXME
 
+                def try_predefined_apps(emv):
+			apps = [
+				toASCIIBytes('1PAY.SYS.DDF01'),  # EMV
+				[0xa0, 0x00, 0x00, 0x00, 0x03, 0x10, 0x10],  # Visa
+				[0xa0, 0x00, 0x00, 0x00, 0x03, 0x20, 0x10],  # Visa Electron
+				[0xa0, 0x00, 0x00, 0x00, 0x03, 0x80, 0x02],  # Visa CAP
+				[0xa0, 0x00, 0x00, 0x00, 0x04, 0x30, 0x60],  # Maestro
+				[0xa0, 0x00, 0x00, 0x00, 0x04, 0x10, 0x10],  # MasterCard
+				[0xa0, 0x00, 0x00, 0x00, 0x04, 0x80, 0x02],  # MasterCard CAP
+			]
 
-		apps = [
-			toASCIIBytes('1PAY.SYS.DDF01'),  # EMV
-			[0xa0, 0x00, 0x00, 0x00, 0x03, 0x10, 0x10],  # Visa
-			[0xa0, 0x00, 0x00, 0x00, 0x03, 0x20, 0x10],  # Visa Electron
-			[0xa0, 0x00, 0x00, 0x00, 0x03, 0x80, 0x02],  # Visa CAP
-			[0xa0, 0x00, 0x00, 0x00, 0x04, 0x30, 0x60],  # Maestro
-			[0xa0, 0x00, 0x00, 0x00, 0x04, 0x10, 0x10],  # MasterCard
-			[0xa0, 0x00, 0x00, 0x00, 0x04, 0x80, 0x02],  # MasterCard CAP
-		]
+			for app in apps:
+				try:
+					name, sfi = emv.select_by_df(app)
+				except EMVException as e:
+					print e.sw1, e.sw2
+					if (e.sw1, e.sw2) != (0x6a, 0x82):
+						raise
+				else:
+					print '%s: %s (%s)' % (app, name, sfi)
 
-		for app in apps:
-			try:
-				name, sfi = emv.select_by_df(app)
-			except EMVException as e:
-				print e.sw1, e.sw2
-				if (e.sw1, e.sw2) != (0x6a, 0x82):
-					raise
-			else:
-				print '%s: %s (%s)' % (app, name, sfi)
+		print 'Minimum length required: %s' % find_minimum_length(emv)
 

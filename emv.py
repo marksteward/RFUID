@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 from smartcard.util import toHexString, toASCIIString, toASCIIBytes, toBytes
 from ber import Tags, BERWithTags
 from collections import OrderedDict
@@ -407,8 +409,10 @@ class DOL(object):
         if ccy is not None:
             self.ccy = ccy
 
-    def get_dol(self, dol_req):
+    def get_dol(self, dol_req=None):
         dol = []
+        if dol_req is None:
+            dol_req = []
 
         # a6 20 c0 00
         # 00 00 00 00 00 01 
@@ -467,7 +471,7 @@ class DOL(object):
 
 
 if __name__ == '__main__':
-    from rfid import Pcsc
+    from rfid import Pcsc, AcsReader
     from pprint import pprint
     import sys
 
@@ -501,13 +505,20 @@ if __name__ == '__main__':
             #pprint(options.get_struct())
             #break
 
-            # Use PSE to list apps
-            name, sfi, pdol_req = tag.emv.select_by_df(toASCIIBytes('1PAY.SYS.DDF01'))
-            print 'Applet data: %s' % tag.emv.get_data_parsed('APPLET_DATA')
 
-            data = tag.emv.read_record_parsed(0x1, sfi)
-            data.dump()
-            apps = data.getlistparsed('APP')
+            if False:
+                # Use PSE to list apps
+                name, sfi, pdol_req = tag.emv.select_by_df(toASCIIBytes('1PAY.SYS.DDF01'))
+                print 'Applet data: %s' % tag.emv.get_data_parsed('APPLET_DATA')
+
+                data = tag.emv.read_record_parsed(0x1, sfi)
+                data.dump()
+                apps = data.getlistparsed('APP')
+
+            else:
+                apps = [(0, 'BARCLAYS', [0xa0, 0x00, 0x00, 0x00, 0x03, 0x80, 0x02])]  # Visa CAP
+
+
             for priority, name, aid in apps:
                 print
                 print 'Selecting %s (%s): %s' % (priority, name, toHexString(aid))
@@ -541,75 +552,82 @@ if __name__ == '__main__':
                         print f % tag.emv.get_data_parsed(t)
 
 
-                if pdol_req:
+                if True:
+                    #print tag.emv.get_data_parsed('ATC')
+                    # This increments the ATC
+                    options = tag.emv.get_options(pdol_req)
+                    # TODO: save this for next time so we don't need to increment ATC
+                    #print tag.emv.get_data_parsed('ATC')
 
-                    if True:
-                        print tag.emv.get_data_parsed('ATC')
-                        # This increments the ATC
-                        options = tag.emv.get_options(pdol_req)
-                        # TODO: save this for next time so we don't need to increment ATC
-                        print tag.emv.get_data_parsed('ATC')
-
-                        options['RMTF1']
+                    if 'RMTF1' in options:
+                        options['RMTF1'].dump()
                         aip = options['RMTF1'].data[:2]
                         afl = options['RMTF1'].data[2:]
                         print 'AIP: %s' % aip
                         print 'AFL: %s' % afl
-                        
-                        AIP_BYTE1 = [
-                            (0x40, 'SDA supported'),
-                            (0x20, 'DDA supported'),
-                            (0x10, 'cardholder verification supported'),
-                            (0x8, 'terminal risk management required'),
-                            (0x4, 'issuer authentication supported'),
-                            (0x2, 'on-device cardholder verification supported'),
-                            (0x1, 'CDA supported'),
-                        ]
-                        AIP_BYTE2 = [
-                            (0x80, 'EMV supported'),
-                        ]
 
                         sfi = afl[0] >> 3
                         start, end, authrecords = afl[1:]
 
+                    elif 'RMTF2' in options:
+                        sfi, start, end, authrecords = options['RMTF2']['AFL'].data
+                        aip = options['RMTF2']['AIP'].data
+
+                    # FIXME
+                    AIP_BYTE1 = [
+                        (0x40, 'SDA supported'),
+                        (0x20, 'DDA supported'),
+                        (0x10, 'cardholder verification supported'),
+                        (0x8, 'terminal risk management required'),
+                        (0x4, 'issuer authentication supported'),
+                        (0x2, 'on-device cardholder verification supported'),
+                        (0x1, 'CDA supported'),
+                    ]
+                    AIP_BYTE2 = [
+                        (0x80, 'EMV supported'),
+                    ]
+
+                else:
+                    sfi, start, end, authrecords = 1, 1, 1, 0
+
+                if False:
+                    for i in range(0x40):
+                        try:
+                            print '%s: %s' % (i, tag.emv.get_challenge(i))
+                            break
+                        except Exception:
+                            pass
                     else:
-                        sfi, start, end, authrecords = 1, 1, 1, 0
+                        print 'No challenge length accepted'
 
-                    if False:
-                        for i in range(0x40):
-                            try:
-                                print '%s: %s' % (i, tag.emv.get_challenge(i))
-                                break
-                            except Exception:
-                                pass
-                        else:
-                            print 'No challenge length accepted'
+                if authrecords > 0:
+                    # follow process at http://www.openscdp.org/scripts/tutorial/emv/readapplicationdata.html
+                    raise NotImplementedError()
 
-                    assert authrecords == 0  # FIXME
-                    for i in range(start, end + 1):
-                        data = tag.emv.read_record_parsed(i, sfi)
-                        print data.dump()
-                        extra = data.parsed('TRACK2')['extra']
-                        assert extra[-1:] == 'F'  # padding
-                        assert extra[-2:-1] == '1'  # ? is 0 for just-EMV mode
-                        assert extra[:5] == '00000'  # pin verification field
-                        thing = toBytes('0' + extra[5:-2])
-                        print toHexString(thing)
-                        # thing appears to be some sort of LSFR?
+                for i in range(start, end + 1):
+                    data = tag.emv.read_record_parsed(i, sfi)
+                    print data.dump()
+                    extra = data.parsed('TRACK2')['extra']
+                    assert extra[-1:] == 'F'  # padding
+                    assert extra[-2:-1] == '1'  # ? is 0 for just-EMV mode
+                    assert extra[:5] == '00000'  # pin verification field
+                    thing = toBytes('0' + extra[5:-2])
+                    print toHexString(thing)
+                    # thing appears to be some sort of LSFR?
 
-                        # For ttq of just 0x20, extra is 0000003771940f
-                        # Does 1 mean magstripe mode?
+                    # For ttq of just 0x20, extra is 0000003771940f
+                    # Does 1 mean magstripe mode?
 
-                    # NB this is the same as before, but extra is part randomised
+                # NB this is the same as before, but extra is part randomised
 
-                    #print tag.emv.get_data(0x8e)
-                    #print tag.emv.get_challenge(0)
-                    #tag.emv.verify('0000')
-                    #tag.emv.generate_ac(0x40, [], thing)
-                    tag.emv.external_auth()
+                #print tag.emv.get_data(0x8e)
+                #print tag.emv.get_challenge(0)
+                #tag.emv.verify('0000')
+                #tag.emv.generate_ac(0x40, [], thing)
+                #tag.emv.external_auth()
 
-                    # 9f10 is mandatory, but isn't in any read records.
-                    cid = 0 # 5.4.3.1
+                # 9f10 is mandatory, but isn't in any read records.
+                cid = 0 # 5.4.3.1
 
                 break # temporarily
 
