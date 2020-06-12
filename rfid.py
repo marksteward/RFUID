@@ -48,7 +48,7 @@ class Pcsc(object):
 
     @classmethod
     def readers(self):
-        readers = map(self.wrapreader, smartcard.System.readers())
+        readers = list(map(self.wrapreader, smartcard.System.readers()))
         return readers
 
     @classmethod
@@ -146,11 +146,11 @@ class BasicChipReader(PcscReader):
         # We could pass this into connect, but this is clearer
         self.atr = ATR(self.conn.getATR())
         if DEBUG:
-            print 'ATR: %s' % self.atr
+            print('ATR: %s' % self.atr)
             try:
                 self.atr.dump()
             except TypeError as e:
-                print 'Exception %r dumping ATR' % e
+                print('Exception %r dumping ATR' % e)
 
         if self.atr.isT1Supported():
             # will raise NoCardException if no card is present
@@ -221,21 +221,21 @@ class LowLevelChipReader(PcscReader):
         HResult(smartcard.scard.SCardBeginTransaction(self.hcard))
 
         if DEBUG:
-            print '> %s' % toHexString(list(apdu))
+            print('> %s' % toHexString(list(apdu)))
 
         response = HResult(smartcard.scard.SCardTransmit(self.hcard, smartcard.scard.SCARD_PCI_T0, list(apdu)))
         if DEBUG:
-            print '< %s' % toHexString(response)
+            print('< %s' % toHexString(response))
 
         sw1, sw2 = response[0:2]
         if sw1 == 0x61:  # More data
             apdu2 = APDU(0, 0xc0, lc=sw2)
             if DEBUG:
-                print '> %s' % toHexString(list(apdu2))
+                print('> %s' % toHexString(list(apdu2)))
 
             response = HResult(smartcard.scard.SCardTransmit(self.hcard, smartcard.scard.SCARD_PCI_T0, list(apdu2)))
             if DEBUG:
-                print '< %s' % toHexString(response)
+                print('< %s' % toHexString(response))
 
         HResult(smartcard.scard.SCardEndTransaction(self.hcard, smartcard.scard.SCARD_LEAVE_CARD))
 
@@ -253,7 +253,7 @@ class AcsReader(PcscReader):
         # We could pass this into connect, but this is clearer
         self.atr = ATR(self.conn.getATR())
         if DEBUG:
-            print 'ATR: %s' % self.atr
+            print('ATR: %s' % self.atr)
             self.atr.dump()
 
         if not self.atr.isT0Supported():
@@ -261,7 +261,7 @@ class AcsReader(PcscReader):
             raise CardConnectionException('Reader reports T0 protocol not supported')
 
         if DEBUG:
-            print 'Firmware version %s' % self.firmware_version()
+            print('Firmware version %s' % self.firmware_version())
 
         self.pn532.set_retries(0, 0, 0)
 
@@ -322,7 +322,7 @@ class AcsReader(PcscReader):
         if sw1 != 0x90:
             raise ReaderException('Error setting LEDs %02x%02x' % (sw1, sw2))
 
-        red, green = map(bool, [sw2 & 0x1, sw2 & 0x2])
+        red, green = list(map(bool, [sw2 & 0x1, sw2 & 0x2]))
         return red, green
 
 
@@ -436,20 +436,20 @@ class Pn532(object):
         resp = self.send(0x4)
         r = iter(resp)
 
-        err = r.next()
-        field = r.next()
-        nbtg = r.next()
+        err = next(r)
+        field = next(r)
+        nbtg = next(r)
 
         tags = []
         for tag in range(nbtg):
             tags.append(dict(
-                logical_id = r.next(),
-                rx_kbps = self.BITRATES[r.next()],
-                tx_kbps = self.BITRATES[r.next()],
-                modulation = self.MODULATIONS[r.next()],
+                logical_id = next(r),
+                rx_kbps = self.BITRATES[next(r)],
+                tx_kbps = self.BITRATES[next(r)],
+                modulation = self.MODULATIONS[next(r)],
             ))
 
-        sam = r.next()
+        sam = next(r)
 
         status = dict(
             error = err,
@@ -514,9 +514,9 @@ class Pn532(object):
         resp = self.send(0x4a, [max_tags, brty] + data)
 
         r = iter(resp)
-        nbtg = r.next()
+        nbtg = next(r)
         if not nbtg:
-            raise NoCardException()
+            raise NoCardException('No cards found', hresult=-1)
 
         tags = []
         if brty == 0:
@@ -537,62 +537,62 @@ class Pn532(object):
         resp = self.send(0x60, [polls, period] + types)
 
         r = iter(resp)
-        nbtg = r.next()
+        nbtg = next(r)
         if not nbtg:
-            raise NoCardException()
+            raise NoCardException('No cards found', hresult=-1)
 
         tags = []
         for i in range(nbtg):
-            tagtype = r.next()
-            length = r.next()
+            tagtype = next(r)
+            length = next(r)
 
-            taginfo = [r.next() for i in range(length)]
+            taginfo = [next(r) for i in range(length)]
             tags.append(self.parse_tag(tagtype, iter(taginfo)))
 
         return tags
 
     # Move to tag.py
     def parse_tag(self, tagtype, r):
-        target = r.next()
+        target = next(r)
 
         if tagtype in (0x10, 0x20):
-            sens_res = (r.next() << 8) + r.next()
-            sel_res = r.next()
+            sens_res = (next(r) << 8) + next(r)
+            sel_res = next(r)
 
-            uidlen = r.next()
-            uid = ''.join('%02x' % r.next() for i in range(uidlen))
+            uidlen = next(r)
+            uid = ''.join('%02x' % next(r) for i in range(uidlen))
 
             tag = Tag(self, target, sens_res, sel_res)
             tag.uid = uid
 
             if tagtype == 0x20:
-                atslen = r.next()
-                ats = [r.next() for i in range(atslen - 1)]
+                atslen = next(r)
+                ats = [next(r) for i in range(atslen - 1)]
                 tag.ats = ats
 
         elif tagtype == 0x23:
-            atqb = [r.next() for i in range(12)]
+            atqb = [next(r) for i in range(12)]
 
-            arlen = r.next()
-            ar = [r.next() for i in range(arlen)]
+            arlen = next(r)
+            ar = [next(r) for i in range(arlen)]
 
         elif tagtype == 0x11:
-            prlen = r.next()
-            pol_res = [r.next() for i in range(prlen - 1)]
+            prlen = next(r)
+            pol_res = [next(r) for i in range(prlen - 1)]
             p = iter(pol_res)
 
-            resp_code = p.next()
-            uid = ''.join('%02x' % p.next() for i in range(8))
-            print uid
+            resp_code = next(p)
+            uid = ''.join('%02x' % next(p) for i in range(8))
+            print(uid)
 
         elif tagtype == 0x4:
-            atqa = (r.next() << 8) + r.next()
-            uid = ''.join('%02x' % r.next() for i in range(4))
+            atqa = (next(r) << 8) + next(r)
+            uid = ''.join('%02x' % next(r) for i in range(4))
 
         return tag
 
 
-from tag import Tag
+from .tag import Tag
 
 if __name__ == '__main__':
 
@@ -620,7 +620,7 @@ if __name__ == '__main__':
         for tag in reader.tags:
             tag = tags[0]
 
-            print 'UID: %s' % tag.uid
-            print 'ATR: %s' % toHexString(tag.ats)
+            print('UID: %s' % tag.uid)
+            print('ATR: %s' % toHexString(tag.ats))
 
 

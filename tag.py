@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 from smartcard.util import toASCIIBytes, toHexString
 #from hashlib import sha256
-from common import TagException
+from .common import TagException
 from collections import defaultdict
 
 class TagInstructionNotSupported(TagException):
@@ -81,14 +81,14 @@ class Tag(object):
             return CardUID(self.uid)
 
 
-from emv import EMV
+from .emv import EMV
 
 if __name__ == '__main__':
-    from rfid import Pcsc
+    from .rfid import Pcsc
     from pprint import pprint
 
     with Pcsc.reader() as reader:
         for tag in reader.tags:
 
-            print tag.find_unique_id()
+            print(tag.find_unique_id())
 

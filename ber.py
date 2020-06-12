@@ -1,6 +1,11 @@
 #!/usr/bin/env python
 from collections import defaultdict
-from UserDict import DictMixin
+
+try:
+    from UserDict import DictMixin
+except ImportError:
+    from collections import MutableMapping as DictMixin
+
 import pprint
 
 class Tags(object):
@@ -138,7 +143,7 @@ class BER(DictMixin):
     def __repr__(self):
         return '<BER %s>' % hex(self)
 
-    def __nonzero__(self):
+    def __bool__(self):
         # No need to parse - any valid data will result in a tag
         # Invalid data will result in an exception when parsing
         return bool(self._data)
@@ -176,18 +181,18 @@ class BER(DictMixin):
    # And now the MultiDict parts
 
     def __getitem__(self, tag):
-        if isinstance(tag, basestring):
+        if isinstance(tag, str):
             tag = self.tags[tag]
         return self.ber[tag][0]
 
     def parsed(self, tag):
-        if isinstance(tag, basestring):
+        if isinstance(tag, str):
             tag = self.tags[tag]
         parser = self.tags.parser(tag)
         return parser(self.ber[tag][0])
 
     def getparsed(self, tag, default=None):
-        if isinstance(tag, basestring):
+        if isinstance(tag, str):
             tag = self.tags[tag]
         if tag not in self.ber:
             return default
@@ -195,32 +200,32 @@ class BER(DictMixin):
         return parser(self.ber[tag][0])
 
     def getlist(self, tag):
-        if isinstance(tag, basestring):
+        if isinstance(tag, str):
             tag = self.tags[tag]
         return self.ber.get(tag, [])
 
     def getlistparsed(self, tag):
-        if isinstance(tag, basestring):
+        if isinstance(tag, str):
             tag = self.tags[tag]
         parser = self.tags.parser(tag)
-        return map(parser, self.ber.get(tag, []))
+        return list(map(parser, self.ber.get(tag, [])))
 
     def keys(self):
-        return self.ber.keys()
+        return list(self.ber.keys())
 
     def items(self):
         return [(k, v[0]) for k, v in self.ber]
 
     def values(self):
-        return [v[0] for v in self.ber.values()]
+        return [v[0] for v in list(self.ber.values())]
 
     def lists(self):
-        return self.ber.items()
+        return list(self.ber.items())
 
     # FIXME: make lists return in order, or add an orderedlists?
 
     def listvalues(self):
-        return self.ber.values()
+        return list(self.ber.values())
 
     def to_dict(self):
         return dict(self.lists())
@@ -250,12 +255,12 @@ class BER(DictMixin):
         return self._ber
 
     def read_tag_id(self, d):
-        tag = d.next()
+        tag = next(d)
         try:
             if tag & 0x1f == 0x1f:
                 b = 0x80
                 while b & 0x80:
-                    b = d.next()
+                    b = next(d)
                     if not b & 0x7f:
                         raise ValueError('Invalid tag ID')
                     tag = (tag << 8) + (b & 0x7f)
@@ -277,7 +282,7 @@ class BER(DictMixin):
                 break
 
             try:
-                length = d.next()
+                length = next(d)
                 if length & 0x80:
                     # size of the length field
                     size = length & 0x7f
@@ -287,15 +292,15 @@ class BER(DictMixin):
 
                     length = 0
                     for i in range(size):
-                        length = (length << 8) + d.next()
+                        length = (length << 8) + next(d)
 
-                value = [d.next() for i in range(length)]
+                value = [next(d) for i in range(length)]
 
                 # This shouldn't be needed for consuming,
                 # but it's helpful for debugging
                 self._entries.append((tag, BER(value, tags=self.tags)))
 
-            except StopIteration, e:
+            except StopIteration as e:
                 raise EOFError('Incomplete data')
 
 
@@ -313,7 +318,7 @@ class BER(DictMixin):
             elif entry.data:
                 try:
                     entry.read_ber()
-                except Exception, e:
+                except Exception as e:
                     pass
                 else:
                     entry = entry.get_struct()
@@ -348,7 +353,7 @@ class BER(DictMixin):
             elif entry.data:
                 try:
                     entry.read_ber()
-                except Exception, e:
+                except Exception as e:
                     entry = repr(entry)
                 else:
                     entry = entry.dump_ber(depth=depth + 1)
@@ -361,7 +366,7 @@ class BER(DictMixin):
         return '\n'.join(lines)
 
     def dump(self):
-        print self.dump_ber()
+        print(self.dump_ber())
 
 
 def BERWithTags(tags):
