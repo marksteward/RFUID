@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 
 from smartcard.util import toHexString, toASCIIString, toASCIIBytes, toBytes
-from ber import Tags, BERWithTags
+from .ber import Tags, BERWithTags
 from collections import OrderedDict
 from os import urandom
-from common import TagException
+from .common import TagException
 
 class EMVError(TagException):
     pass
@@ -126,7 +126,7 @@ def tag_length(ber):
         try:
             tag = ber.read_tag_id(d)
             # No idea if this can be multi-byte
-            length = int(d.next())
+            length = int(next(d))
             entries.append((tag, length))
         except StopIteration:
             break
@@ -290,7 +290,7 @@ class EMV(object):
             dfs.append(self.select_by_df(name))
             while True:
                 dfs.append(self.select_by_df(name, 'next'))
-        except EMVException, e:
+        except EMVException as e:
             if not (e.sw1, e.sw2) == (0x6a, 0x82):
                 raise
 
@@ -313,7 +313,7 @@ class EMV(object):
         for n in range(1, 0x7f):
             try:
                 records.append(self.read_record(n, sfi))
-            except EMVException, e:
+            except EMVException as e:
                 if not (e.sw1, e.sw2) == (0x6a, 0x83):
                     raise
                 break
@@ -334,7 +334,7 @@ class EMV(object):
         if self.pin_tries is None:
             self.get_pin_tries()
 
-        print 'PIN tries left: %s' % self.pin_tries
+        print('PIN tries left: %s' % self.pin_tries)
         if not self.pin_tries:
             raise EMVError('No PIN retries left')
 
@@ -352,7 +352,7 @@ class EMV(object):
         return self.BER(resp)
 
     def get_data(self, tag):
-        if isinstance(tag, basestring):
+        if isinstance(tag, str):
             tag = self.TAGS[tag]
         # Seems to work with either 0 or 0x80 for class
         resp = self.send(APDU(0x80, 0xca, tag >> 8, tag & 0xff))
@@ -450,11 +450,11 @@ class DOL(object):
 
             elif tag == 0x9f37:
                 # Unpredictable number
-                data = map(ord, urandom(length))
+                data = list(map(ord, urandom(length)))
 
             elif tag == 0x9f6a:
                 # Unpredictable number
-                data = map(ord, urandom(length))
+                data = list(map(ord, urandom(length)))
 
             elif (tag, length) == (0x5f2a, 2):
                 # Country code - http://en.wikipedia.org/wiki/ISO_4217
@@ -471,7 +471,7 @@ class DOL(object):
 
 
 if __name__ == '__main__':
-    from rfid import Pcsc, AcsReader
+    from .rfid import Pcsc, AcsReader
     from pprint import pprint
     import sys
 
@@ -502,7 +502,7 @@ if __name__ == '__main__':
             if False:
                 # Use PSE to list apps
                 name, sfi, pdol_req = tag.emv.select_by_df(toASCIIBytes('1PAY.SYS.DDF01'))
-                print 'Applet data: %s' % tag.emv.get_data_parsed('APPLET_DATA')
+                print('Applet data: %s' % tag.emv.get_data_parsed('APPLET_DATA'))
 
                 data = tag.emv.read_record_parsed(0x1, sfi)
                 data.dump()
@@ -513,13 +513,13 @@ if __name__ == '__main__':
 
 
             for priority, name, aid in apps:
-                print
-                print 'Selecting %s (%s): %s' % (priority, name, toHexString(aid))
+                print()
+                print('Selecting %s (%s): %s' % (priority, name, toHexString(aid)))
                 name, sfi, pdol_req = tag.emv.select_by_df(aid)
                 if pdol_req:
-                    print 'PDOL request:'
+                    print('PDOL request:')
                     for tag_id, length in pdol_req:
-                        print '  0x%x: %s' % (tag_id, length)
+                        print('  0x%x: %s' % (tag_id, length))
 
                 #print '%s: %s' % (toHexString(aid), toHexString(tag.emv.read_record(1, sfi)))
 
@@ -527,7 +527,7 @@ if __name__ == '__main__':
                     sfi = 1 # FIXME: why is this None by default?
                     tag.emv.read_record_parsed(0x1, sfi).dump()
                     card = tag.emv.read_record_parsed(0x1, sfi)['TRACK2']
-                    print card
+                    print(card)
                     #print card['cardnum']
 
                 if False:
@@ -542,7 +542,7 @@ if __name__ == '__main__':
                         ('CTQ:            %s',   'CTQ'),
                     ]
                     for f, t in data:
-                        print f % tag.emv.get_data_parsed(t)
+                        print(f % tag.emv.get_data_parsed(t))
 
 
                 if True:
@@ -556,8 +556,8 @@ if __name__ == '__main__':
                         options['RMTF1'].dump()
                         aip = options['RMTF1'].data[:2]
                         afl = options['RMTF1'].data[2:]
-                        print 'AIP: %s' % aip
-                        print 'AFL: %s' % afl
+                        print('AIP: %s' % aip)
+                        print('AFL: %s' % afl)
 
                         sfi = afl[0] >> 3
                         start, end, authrecords = afl[1:]
@@ -586,12 +586,12 @@ if __name__ == '__main__':
                 if False:
                     for i in range(0x40):
                         try:
-                            print '%s: %s' % (i, tag.emv.get_challenge(i))
+                            print('%s: %s' % (i, tag.emv.get_challenge(i)))
                             break
                         except Exception:
                             pass
                     else:
-                        print 'No challenge length accepted'
+                        print('No challenge length accepted')
 
                 if authrecords > 0:
                     # follow process at http://www.openscdp.org/scripts/tutorial/emv/readapplicationdata.html
@@ -599,13 +599,13 @@ if __name__ == '__main__':
 
                 for i in range(start, end + 1):
                     data = tag.emv.read_record_parsed(i, sfi)
-                    print data.dump()
+                    print(data.dump())
                     extra = data.parsed('TRACK2')['extra']
                     assert extra[-1:] == 'F'  # padding
                     assert extra[-2:-1] == '1'  # ? is 0 for just-EMV mode
                     assert extra[:5] == '00000'  # pin verification field
                     thing = toBytes('0' + extra[5:-2])
-                    print toHexString(thing)
+                    print(toHexString(thing))
                     # thing appears to be some sort of LSFR?
 
                     # For ttq of just 0x20, extra is 0000003771940f
@@ -625,4 +625,4 @@ if __name__ == '__main__':
                 break # temporarily
 
 
-from rfid import AcsReader, APDU
+from .rfid import AcsReader, APDU
